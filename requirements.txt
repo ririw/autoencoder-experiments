@@ -10,4 +10,3 @@ numpy==1.9.1
 pinject==0.10.2
 see==1.0.1
 wsgiref==0.1.2
-nosetests

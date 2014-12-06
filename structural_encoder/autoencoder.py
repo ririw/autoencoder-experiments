@@ -4,6 +4,7 @@
 
 import theano.tensor as T
 import theano
+import copy
 import logging
 import pinject
 import random
@@ -11,9 +12,8 @@ import numpy as np
 
 class AutoEncoder(object):
 	@pinject.copy_args_to_internal_fields
-	def __init__(self, window_iterator, window_corruptor, vocab):
+	def __init__(self):
 		self.configured = False
-		self.vocab = vocab
 		self.vocab_mat = T.fmatrix('vocab')
 		# x has size num_samples x (window_size * vec_width)
 		self.x = T.fmatrix('x')
@@ -46,7 +46,7 @@ class AutoEncoder(object):
 		self.configured = True
 		return self
 
-	def _build_dataset(self, window_iterator, corrupted_iterator):
+	def _build_dataset(self, window_iterator, corrupted_iterator, vocabulary):
 		assert self.configured
 		batch = []
 		corrupted_batch = []
@@ -56,8 +56,8 @@ class AutoEncoder(object):
 		for i in xrange(self._batch_size):
 			words = window_iter.next()
 			corrupted_words = corrupted_window_iter.next()
-			w_vec  = np.concatenate([self._vocabulary[word] for word in words])
-			cw_vec = np.concatenate([self._vocabulary[word] for word in corrupted_words])
+			w_vec  = np.concatenate([vocabulary[word] for word in words])
+			cw_vec = np.concatenate([vocabulary[word] for word in corrupted_words])
 			batch.append(w_vec)
 			corrupted_batch.append(cw_vec)
 		batch_matrix = np.concatenate(batch)
@@ -73,17 +73,16 @@ class AutoEncoder(object):
 		# and then see it goes to zero for all.
 		import debug
 		batch_matrix, corrupted_batch_matrix = \
-			self._build_dataset(window_iterator, corrupted_iterator)
+			self._build_dataset(window_iterator, corrupted_iterator, vocab)
 		
-		[db, dW, dVocab] = self.grad_fn(batch_matrix, corrupted_batch_matrix, b, W, vocab)
+		[db, dW, dVocab] = self.grad_fn(batch_matrix, corrupted_batch_matrix, b, W, vocab.vocab_matrix)
 		b_new = np.copy(b) - self.learning_rate * db
 		W_new = np.copy(W) - self.learning_rate * dW
-		vocab_new = np.copy(vocab) - self.learning_rate * dVocab
+		vocab_new_mat = np.copy(vocab) - self.learning_rate * dVocab
+		vocab_new = vocab.with_new_matrix(vocab_new_mat)
 
 		return b_new, W_new, vocab_new
 
-	def build_vocab_matrix(self):
-		return np.random.random((len(self.vocab), self._vocab_length))
 
 	def build_W_matrix(self):
 		rows = self._hidden_nodes
@@ -102,18 +101,31 @@ class AutoEncoder(object):
 
 
 class Vocab(object):
-	def __init__(self, window_iterator):
+	def __init__(self, window_iterator, vector_width):
 		self._window_iterator = window_iterator
-		self.vocab = list({words[0] for words in window_iterator})
+		self.vocab_index = {word: ix for ix, word in enumerate({words[0] for words in window_iterator})}
+		self.vector_width = vector_width
+		self.vocab_matrix = self.build_vocab_matrix()
+
+	def build_vocab_matrix(self):
+		return np.random.random((len(self.vocab_index), self.vector_width))
 
 	def check_against_iter(self, iterator):
 		assert(self._window_iterator == iterator)
+	
+	def with_new_matrix(self, new_matrix):
+		assert new_matrix.shape == self.vocab_matrix.shape
+		new = copy.copy(self)
+		new.vocab_matrix = new_matrix
+		return new
 
 	def __len__(self):
-		return len(self.vocab)
+		return len(self.vocab_index)
 
-	def __getitem__(self, ix):
-		self.vocab[ix]
+	def __getitem__(self, word):
+		ix = self.vocab_index[word]
+		return self.vocab_matrix[ix, :]
+
 
 class WindowCorruptor(object):
 	def __init__(self, window_iterator, vocab):
@@ -137,16 +149,12 @@ class WindowCorruptor(object):
 import filereader
 
 obj_graph = pinject.new_object_graph()
-iterator = obj_graph.provide(filereader.WindowIterator).configure('/home/riri/Downloads/gutenberg/0/0', 5)
-vocab = Vocab(iterator)
+iterator = obj_graph.provide(filereader.WindowIterator).configure('gutenberg/1/0/1', 5)
+vocab = Vocab(iterator, 500)
 corruptor = WindowCorruptor(iterator, vocab)
-ae = AutoEncoder(iterator, corruptor, vocab)
+ae = AutoEncoder()
 ae.configure(50000, 500, 5, 500)
 logging.warning('Commencing a training step')
 b = ae.build_b_vector()
-vocab_vec = ae.build_vocab_matrix()
 W = ae.build_W_matrix()
-ae.train_step(ae._window_iterator, ae._window_corruptor, W, b, vocab_vec)
-
-
-
+ae.train_step(ae._window_iterator, ae._window_corruptor, W, b, vocab)
