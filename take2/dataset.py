@@ -71,7 +71,7 @@ class BasicFileIter(object):
 			sentence_iterator = self._sentence_iterator(self.file_or_dir)
 		for scentence in sentence_iterator:
 			for word in self.word_tokenizer.tokenize(scentence):
-				yield word
+				yield word.lower()
 	
 	def __iter__(self):
 		if isinstance(self.file_or_dir, str):
@@ -87,8 +87,9 @@ class BasicFileIter(object):
 		for sentence in sentence_iterator:
 			window = [start_of_window for i in xrange(self.window_size)]
 			for word in self.word_tokenizer.tokenize(sentence):
+				lc_word = word.lower()
 				window.pop(0)
-				window.append(word)
+				window.append(lc_word)
 				# Yield a COPY
 				yield window[:]
 			for i in xrange(self.window_size-1):
