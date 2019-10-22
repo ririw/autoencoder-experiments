@@ -1,4 +1,4 @@
-Pillow==3.3.2
+Pillow==6.2.0
 Theano==0.6.0
 pylearn2==0.6.0
 argparse==1.2.1
